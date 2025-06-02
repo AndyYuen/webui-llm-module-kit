@@ -1,0 +1,99 @@
+<!DOCTYPE HTML>
+<html>
+<head>
+  <title>Question Input Form</title>
+  <meta charset=utf-8>
+  <meta name="viewport" content="width=device-width, initial-scale=1">
+</head>
+<body>
+
+    <h2>Ask AI a question:</h2>
+    <textarea name="question" id="question" rows="8" cols="80"></textarea>
+    <br><br><br>
+    <label for="status">Status:</label>
+    <br><input type="text" id="status" name="status" maxlength="80" size="80"><br><br>
+    <h2>Answer:</h2>
+    <textarea name="answer" id="answer"  rows="24" cols="80" readonly></textarea>
+    <br>
+
+    <br><input type="reset" id="clear" value="Clear" onClick="clearText()">
+    <input type="submit" id="submit" value="Submit" onClick="getAnswer()">
+
+
+<script> 
+
+var gateway = `ws://${window.location.hostname}:${window.location.port}/ws`;
+var websocket;
+// Init web socket when the page loads
+window.addEventListener('load', onload);
+
+function onload(event) {
+  initWebSocket();
+}
+
+function getAnswer(){
+  // alert(document.getElementById('question').value);
+  document.getElementById("clear").disabled = true;
+  document.getElementById("submit").disabled = true;
+  document.getElementById("answer").value = "";
+  document.getElementById("status").value = "";
+
+  var obj = new Object();
+  obj.question = document.getElementById('question').value;
+  var jsonString= JSON.stringify(obj);
+  // alert(jsonString);
+  websocket.send(jsonString);
+}
+
+function initWebSocket() {
+  console.log('Trying to open a WebSocket connection…');
+  websocket = new WebSocket(gateway);
+  websocket.onopen = onOpen;
+  websocket.onclose = onClose;
+  websocket.onmessage = onMessage;
+}
+
+// When websocket is established, call the getReadings() function
+function onOpen(event) {
+    console.log('Connection opened');
+}
+
+function onClose(event) {
+    console.log('Connection closed');
+    setTimeout(initWebSocket, 2000);
+}
+
+// Function that receives the message from the ESP32 with the readings
+function onMessage(event) {
+    console.log(event.data);
+    // alert(event.data);
+    var jsonObj = JSON.parse(event.data);
+    var keys = Object.keys(jsonObj);
+
+    for (var i = 0; i < keys.length; i++){
+        var key = keys[i];
+        if (key == "chunk") {
+          document.getElementById("answer").value += jsonObj[key];
+          continue;
+        } 
+        else if (key == "status") {
+          if (jsonObj[key] == "Answer complete.")  {
+            document.getElementById("clear").disabled = false;
+            document.getElementById("submit").disabled = false;            
+          }
+        }
+        document.getElementById(key).value = jsonObj[key];
+    }
+}
+
+function clearText() {
+  document.getElementById("answer").value = "";
+  document.getElementById("question").value = "";
+  document.getElementById("status").value = "";
+}
+
+
+</script> 
+
+</body>
+</html>
