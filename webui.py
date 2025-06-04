@@ -3,6 +3,8 @@ import json
 from flask import Flask, render_template
 from flask_sock import Sock
 import threading
+import errno
+import time
 
 app = Flask(__name__)
 
@@ -116,6 +118,9 @@ def renderPage():
 def events(ws):
     global id, sock, llm_work_id, wsDict
     print("Websocket connected.")
+    if sock is None:
+        print("No LLM socket connection. Ignoring request.")
+        return
 
     # invoke inference with the question received from the webui
     while True:
@@ -146,51 +151,66 @@ def events(ws):
 def llm():
     global sock, llm_work_id, wsDict
 
-    # connect to LLM host:port
-    sock = create_tcp_connection("localhost", 10001)
+    while True:
+        try:
+            # connect to LLM host:port
+            sock = create_tcp_connection("localhost", 10001)
+        except socket.error as e:
+            if e.errno == errno.ECONNREFUSED:
+                print("LLM socket connection refused")
+            elif e.errno == errno.ETIMEDOUT:
+                print("LLM socket connection timed out")
+            else:
+                print(f"Unexpected LLM socket error: {e}")
 
-    try:
-        print("Initializing LLM...")
-        init_data = create_init_data()
-        llm_work_id = setup(sock, init_data)
-        print("LLM initialisation completed.")
+        while sock is not None:
+            try:
+                print("Initializing LLM...")
+                init_data = create_init_data()
+                llm_work_id = setup(sock, init_data)
+                print("LLM initialisation completed.")
 
-        while True:
-            # print("Waiting for inference response.")
-            response = receive_response(sock)
-            # print("Inference response: " + response)
+                while True:
+                    # print("Waiting for inference response.")
+                    response = receive_response(sock)
+                    # print("Inference response: " + response)
 
-            response_data = json.loads(response)
+                    response_data = json.loads(response)
 
-            # print("Handling inference response.")
-            request_id, data = parse_inference_response(response_data)
-            if data is None:
-                print("Data is None.")
-                continue
+                    # print("Handling inference response.")
+                    request_id, data = parse_inference_response(response_data)
+                    if data is None:
+                        print("Data is None.")
+                        continue
 
-            finish = data.get('finish')
-            ws = wsDict.get(request_id)
-            if ws is None:
-                print("ws in None.")
-                continue
+                    finish = data.get('finish')
+                    ws = wsDict.get(request_id)
+                    if ws is None:
+                        print("ws in None.")
+                        continue
 
-            if finish:
-                ws.send(STATUS_COMPLETION)
-                wsDict.pop(request_id, None)
-                continue
+                    if finish:
+                        ws.send(STATUS_COMPLETION)
+                        wsDict.pop(request_id, None)
+                        continue
 
-            # print("Sending inference response to web page.")
-            delta = data.get('delta')
-            msg = {}
-            msg["chunk"] = delta
-            msg["status"] = "Receiving answer."
-            ws.send(json.dumps(msg))
+                    # print("Sending inference response to web page.")
+                    delta = data.get('delta')
+                    msg = {}
+                    msg["chunk"] = delta
+                    msg["status"] = "Receiving answer."
+                    ws.send(json.dumps(msg))
 
 
-            # print(delta)
+                    # print(delta)
 
-    finally:
-        close_connection(sock)
+            finally:
+                close_connection(sock)
+                sock = None
+        
+        # wait a bit before retrying connection
+        time.sleep(5)
+
 
 
 if __name__ == "__main__":
